@@ -1,0 +1,63 @@
+name: Fork hotfix image
+
+# Builds the shim from this branch's source and overlays it onto the image that
+# is currently deployed, then publishes the result to this repository owner's
+# GHCR namespace. Intended for verifying a fix on a fork before it goes
+# upstream; it does not touch the certified release pipeline.
+
+on:
+  push:
+    branches: [fix/pg-bool-column-text]
+  workflow_dispatch:
+    inputs:
+      base_image:
+        description: "Deployed image to overlay (pinned by digest)"
+        required: false
+        type: string
+        default: "ghcr.io/cgnl/plex-postgresql-plexinc@sha256:4a40b98dda5fdda10c4413d078e7f7b3aaf3e4bd1ee9d2aaec112fa9a35618fb"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: fork-hotfix-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      BASE_IMAGE: ${{ inputs.base_image || 'ghcr.io/cgnl/plex-postgresql-plexinc@sha256:4a40b98dda5fdda10c4413d078e7f7b3aaf3e4bd1ee9d2aaec112fa9a35618fb' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build the shim from source
+        run: docker buildx build --target export-payload --output type=local,dest=payload .
+      - name: Check the payload
+        run: |
+          set -eu
+          test -s payload/libs/db_interpose_pg.so
+          ! grep -E 'Forbidden' payload/libs/default-exports.txt
+          grep -c . payload/libs/default-exports.txt
+      - name: Image reference
+        id: ref
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/plex-postgresql-plexinc" >> "$GITHUB_OUTPUT"
+      - name: Overlay onto the deployed image and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.hotfix
+          platforms: linux/amd64
+          build-contexts: payload=./payload
+          build-args: BASE_IMAGE=${{ env.BASE_IMAGE }}
+          push: true
+          tags: |
+            ${{ steps.ref.outputs.image }}:bool-text-fix
+            ${{ steps.ref.outputs.image }}:bool-text-fix-${{ github.sha }}

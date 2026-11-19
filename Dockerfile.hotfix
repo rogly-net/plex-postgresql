@@ -1,0 +1,11 @@
+# Overlay a freshly built shim onto an already-deployed image.
+#
+# Everything except the shim stays byte-identical to BASE_IMAGE, so a deployed
+# release can be verified with a single changed component. The payload comes
+# from `docker buildx build --target export-payload` (the normal Dockerfile
+# builder stage) passed in as the named build context `payload`; a named
+# context is not subject to .dockerignore, which excludes *.so.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY --from=payload --chmod=755 /libs/db_interpose_pg.so /usr/local/lib/plex-postgresql/db_interpose_pg.so
+COPY --from=payload /libs/default-exports.txt /usr/local/lib/plex-postgresql/default-exports.txt

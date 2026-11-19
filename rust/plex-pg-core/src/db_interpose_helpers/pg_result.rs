@@ -64,6 +64,8 @@ pub fn rust_column_text_reformat_aggregate(
     c_int::from(write_i32_to_buf(out, out_len, val))
 }
 
+const PG_BOOL_OID: c_uint = 16;
+
 pub fn rust_column_text_transform(
     col_name: *const c_char,
     oid: c_uint,
@@ -83,6 +85,23 @@ pub fn rust_column_text_transform(
             *out = 0;
         }
         return -1;
+    }
+
+    // PostgreSQL booleans arrive as "t"/"f"; SQLite has no boolean type and
+    // yields 1/0 (e.g. SELECT EXISTS(...)). Plex parses the text, so match it.
+    if oid == PG_BOOL_OID && out_len >= 2 {
+        let digit = match bytes {
+            b"t" => Some(b'1'),
+            b"f" => Some(b'0'),
+            _ => None,
+        };
+        if let Some(d) = digit {
+            unsafe {
+                *out.cast::<u8>() = d;
+                *out.cast::<u8>().add(1) = 0;
+            }
+            return 1;
+        }
     }
 
     if rust_column_text_reformat_aggregate(col_name, oid, pg_sql, source_value, out, out_len) != 0 {

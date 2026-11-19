@@ -685,6 +685,39 @@ fn expected_sqlite_type_for_decltype_unknown_returns_negative() {
     assert!(rust_expected_sqlite_type_for_decltype(std::ptr::null()) < 0);
 }
 
+fn text_transform(oid: u32, src: &str) -> (c_int, String) {
+    let col = c("exists");
+    let sql = c("SELECT EXISTS (SELECT 1 FROM t)");
+    let src_c = c(src);
+    let mut out = [0 as c_char; 32];
+    let rc = rust_column_text_transform(
+        col.as_ptr(),
+        oid,
+        sql.as_ptr(),
+        src_c.as_ptr(),
+        src.len(),
+        out.as_mut_ptr(),
+        out.len(),
+    );
+    let out_s = unsafe { CStr::from_ptr(out.as_ptr()) }
+        .to_string_lossy()
+        .into_owned();
+    (rc, out_s)
+}
+
+#[test]
+fn column_text_transform_converts_pg_bool_to_sqlite_integer_text() {
+    assert_eq!(text_transform(16, "t"), (1, "1".to_string()));
+    assert_eq!(text_transform(16, "f"), (1, "0".to_string()));
+}
+
+#[test]
+fn column_text_transform_leaves_non_bool_t_and_f_alone() {
+    // A text column (OID 25) holding the letter "t" must not become "1".
+    assert_eq!(text_transform(25, "t").0, 0);
+    assert_eq!(text_transform(25, "f").0, 0);
+}
+
 #[test]
 fn column_text_reformat_aggregate_int8() {
     let col = c("count");
